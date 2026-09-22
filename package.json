@@ -1,0 +1,39 @@
+{
+  "name": "among-us-dobble",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Among Us themed Dobble / Spot It \u2014 two-PC multiplayer, frontend only (React + Vite + Tailwind + PeerJS)",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "broker": "node scripts/local-broker.mjs",
+    "gen:deck": "node scripts/generate-deck.mjs",
+    "gen:symbols": "node scripts/generate-placeholder-symbols.mjs",
+    "test:deck": "node scripts/verify-deck.mjs",
+    "test:layout": "node scripts/verify-layout.mjs",
+    "test:rules": "node scripts/simulate-game.mjs",
+    "test": "npm run test:deck && npm run test:layout && npm run test:rules && npm run test:fairness",
+    "test:e2e": "node scripts/e2e-playthrough.mjs",
+    "test:e2e:clicks": "node scripts/e2e-clickability.mjs",
+    "test:fairness": "node scripts/verify-fairness.mjs"
+  },
+  "dependencies": {
+    "mqtt": "^5.16.0",
+    "peerjs": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "aedes": "^1.2.0",
+    "autoprefixer": "^10.4.20",
+    "peer": "^1.0.2",
+    "playwright": "^1.63.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^5.4.11",
+    "ws": "^8.21.3"
+  }
+}

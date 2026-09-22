@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Among Us Dobble — Connection Check</title>
+    <style>
+      :root {
+        --bg: #070b16;
+        --panel: #111a33;
+        --line: #243361;
+        --text: #e8eeff;
+        --dim: #93a4cc;
+        --ok: #50ef39;
+        --bad: #ff6b6b;
+        --warn: #f0a81c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 32px 16px 64px;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.55 "Trebuchet MS", "Segoe UI", Verdana, system-ui, sans-serif;
+      }
+      main { max-width: 760px; margin: 0 auto; }
+      h1 { font-size: 26px; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 6px; }
+      p.sub { color: var(--dim); margin: 0 0 26px; }
+      .verdict {
+        border: 3px solid var(--line);
+        border-radius: 16px;
+        padding: 18px 20px;
+        margin-bottom: 24px;
+        background: var(--panel);
+        font-size: 17px;
+        font-weight: bold;
+      }
+      .verdict.ok { border-color: #0a5b28; background: #0b2a18; }
+      .verdict.warn { border-color: #9a6205; background: #2a1e08; }
+      .verdict.bad { border-color: #7a0838; background: #2a0b12; }
+      ul { list-style: none; margin: 0; padding: 0; }
+      li {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        border: 2px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+        background: var(--panel);
+      }
+      .mark { font-size: 18px; width: 22px; flex: none; text-align: center; }
+      .name { font-weight: bold; }
+      .detail { color: var(--dim); font-size: 13px; margin-top: 2px; word-break: break-word; }
+      .ok .mark { color: var(--ok); }
+      .bad .mark { color: var(--bad); }
+      .warn .mark { color: var(--warn); }
+      button {
+        background: #1f5fd0;
+        color: #fff;
+        border: 3px solid #0c2c74;
+        border-radius: 12px;
+        padding: 12px 22px;
+        font: inherit;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        cursor: pointer;
+        margin-top: 8px;
+      }
+      button:disabled { opacity: 0.5; cursor: default; }
+      pre {
+        background: #060a14;
+        border: 2px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        font-size: 12px;
+        overflow-x: auto;
+        color: var(--dim);
+        white-space: pre-wrap;
+      }
+      h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--dim); margin: 28px 0 10px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Connection Check</h1>
+      <p class="sub">
+        Run this on <strong>both</strong> PCs. It tests every route the game can use, so you can see
+        exactly what this network allows.
+      </p>
+
+      <div class="verdict" id="verdict">Running checks…</div>
+      <ul id="results"></ul>
+
+      <button id="rerun" disabled>Run again</button>
+
+      <h2>Copy this if you need help</h2>
+      <pre id="report">…</pre>
+    </main>
+
+    <script>
+      // Kept in step with src/game/netconfig.js. This page is deliberately
+      // dependency-free so it works even if the app itself will not start.
+      const ICE_SERVERS = [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+        {
+          urls: [
+            'turn:openrelay.metered.ca:80',
+            'turn:openrelay.metered.ca:443',
+            'turns:openrelay.metered.ca:443?transport=tcp',
+          ],
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'],
+          username: 'peerjs',
+          credential: 'peerjsp',
+        },
+      ]
+
+      const RELAY_URLS = [
+        'wss://broker.emqx.io:8084/mqtt',
+        'wss://broker.hivemq.com:8884/mqtt',
+        'wss://test.mosquitto.org:8081/',
+      ]
+
+      const resultsEl = document.getElementById('results')
+      const verdictEl = document.getElementById('verdict')
+      const reportEl = document.getElementById('report')
+      const rerunEl = document.getElementById('rerun')
+
+      const state = {}
+
+      function row(key, name) {
+        const li = document.createElement('li')
+        li.className = 'warn'
+        li.innerHTML =
+          '<span class="mark">…</span><div><div class="name"></div><div class="detail">checking…</div></div>'
+        li.querySelector('.name').textContent = name
+        resultsEl.appendChild(li)
+        return {
+          set(ok, detail) {
+            li.className = ok === true ? 'ok' : ok === false ? 'bad' : 'warn'
+            li.querySelector('.mark').textContent = ok === true ? '✓' : ok === false ? '✕' : '!'
+            li.querySelector('.detail').textContent = detail
+            state[key] = { ok, detail }
+          },
+        }
+      }
+
+      const withTimeout = (promise, ms, fallback) =>
+        Promise.race([promise, new Promise((r) => setTimeout(() => r(fallback), ms))])
+
+      /** Does a WebSocket to this URL open at all? */
+      function checkWebSocket(url, protocol) {
+        return new Promise((resolve) => {
+          let done = false
+          let ws
+          const finish = (ok, detail) => {
+            if (done) return
+            done = true
+            try {
+              ws && ws.close()
+            } catch (e) {}
+            resolve({ ok, detail })
+          }
+          try {
+            ws = protocol ? new WebSocket(url, protocol) : new WebSocket(url)
+          } catch (e) {
+            return finish(false, String(e.message || e))
+          }
+          const t0 = performance.now()
+          ws.onopen = () => finish(true, Math.round(performance.now() - t0) + 'ms')
+          ws.onerror = () => finish(false, 'blocked or unreachable')
+          ws.onclose = (e) => finish(false, 'closed (code ' + e.code + ')')
+          setTimeout(() => finish(false, 'timed out after 8s'), 8000)
+        })
+      }
+
+      /** Gather ICE candidates and report which kinds the network permits. */
+      function checkIce() {
+        return new Promise((resolve) => {
+          const found = { host: 0, srflx: 0, relay: 0 }
+          let pc
+          try {
+            pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 1 })
+          } catch (e) {
+            return resolve({ found, error: String(e.message || e) })
+          }
+          pc.createDataChannel('probe')
+          pc.onicecandidate = (e) => {
+            if (!e.candidate) return finish()
+            const type = (e.candidate.candidate.match(/ typ (\w+)/) || [])[1]
+            if (type && found[type] !== undefined) found[type]++
+          }
+          let done = false
+          const finish = () => {
+            if (done) return
+            done = true
+            try {
+              pc.close()
+            } catch (err) {}
+            resolve({ found })
+          }
+          pc.createOffer()
+            .then((o) => pc.setLocalDescription(o))
+            .catch(() => finish())
+          setTimeout(finish, 9000)
+        })
+      }
+
+      async function run() {
+        rerunEl.disabled = true
+        resultsEl.innerHTML = ''
+
+        const rOnline = row('online', 'Internet reachable')
+        const rPeer = row('peerBroker', 'Matchmaking service (PeerJS)')
+        const rStun = row('stun', 'STUN — can this PC discover its public address?')
+        const rTurn = row('turn', 'TURN — can WebRTC fall back to a relay?')
+        const rRelay = row('relay', 'Backup relay (WebSocket)')
+
+        rOnline.set(navigator.onLine, navigator.onLine ? 'browser reports online' : 'browser reports offline')
+
+        // --- PeerJS broker -------------------------------------------------
+        const peerProbe = await withTimeout(
+          checkWebSocket('wss://0.peerjs.com/peerjs?key=peerjs&id=probe-' + Math.random().toString(36).slice(2) + '&token=' + Math.random().toString(36).slice(2), null),
+          9000,
+          { ok: false, detail: 'timed out' }
+        )
+        rPeer.set(
+          peerProbe.ok,
+          peerProbe.ok
+            ? 'reachable (' + peerProbe.detail + ')'
+            : 'NOT reachable — ' + peerProbe.detail
+        )
+
+        // --- ICE -----------------------------------------------------------
+        const ice = await checkIce()
+        rStun.set(
+          ice.found.srflx > 0,
+          ice.found.srflx > 0
+            ? ice.found.srflx + ' server-reflexive candidate(s)'
+            : 'no STUN candidates — UDP is likely blocked'
+        )
+        rTurn.set(
+          ice.found.relay > 0,
+          ice.found.relay > 0
+            ? ice.found.relay + ' relay candidate(s)'
+            : 'no TURN relay candidates — direct WebRTC will likely fail here'
+        )
+
+        // --- relay brokers -------------------------------------------------
+        let relayOk = false
+        const relayDetails = []
+        for (const url of RELAY_URLS) {
+          const res = await checkWebSocket(url, 'mqtt')
+          relayDetails.push(url.replace(/^wss:\/\//, '') + ': ' + (res.ok ? 'OK ' + res.detail : res.detail))
+          if (res.ok) {
+            relayOk = true
+            break
+          }
+        }
+        rRelay.set(relayOk, relayDetails.join(' | '))
+
+        // --- verdict -------------------------------------------------------
+        const directLikely = peerProbe.ok && (ice.found.relay > 0 || ice.found.srflx > 0)
+        let cls, text
+
+        if (relayOk && directLikely) {
+          cls = 'ok'
+          text = 'This PC can connect both ways. The game should work normally.'
+        } else if (relayOk) {
+          cls = 'ok'
+          text =
+            'Direct WebRTC looks blocked on this network, but the backup relay works — the game will use that automatically. You should be fine.'
+        } else if (directLikely) {
+          cls = 'warn'
+          text =
+            'The backup relay is blocked, but direct WebRTC looks possible. The game may work; if it does not, try a phone hotspot.'
+        } else {
+          cls = 'bad'
+          text =
+            'Neither route is available on this network. Try a phone hotspot on this PC, or run your own broker (npm run broker) with both PCs on the same Wi-Fi.'
+        }
+
+        verdictEl.className = 'verdict ' + cls
+        verdictEl.textContent = text
+
+        reportEl.textContent = JSON.stringify(
+          {
+            when: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            page: location.href,
+            secureContext: window.isSecureContext,
+            iceCandidates: ice.found,
+            checks: state,
+          },
+          null,
+          2
+        )
+
+        rerunEl.disabled = false
+      }
+
+      rerunEl.addEventListener('click', run)
+      run()
+    </script>
+  </body>
+</html>

@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-space-900 text-white font-display antialiased;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* The game background itself must never register as an answer. */
+  button:focus-visible {
+    outline: 3px solid #38fedc;
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .au-btn {
+    @apply relative inline-flex items-center justify-center rounded-2xl px-8 py-4
+           text-xl font-bold uppercase tracking-widest text-white
+           border-[3px] border-black/60 shadow-chunky
+           transition-transform duration-100 select-none;
+  }
+
+  .au-btn:active:not(:disabled) {
+    @apply translate-y-[5px] shadow-none;
+  }
+
+  .au-btn:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  .au-panel {
+    @apply rounded-3xl border-[3px] border-black/60 bg-space-700/90 shadow-chunky backdrop-blur-sm;
+  }
+
+  .au-title {
+    @apply font-black uppercase tracking-[0.18em];
+    text-shadow: 0 4px 0 rgba(0, 0, 0, 0.55);
+  }
+}
+
+/* Screen-reader-only helper */
+.sr-only-focusable:not(:focus):not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
